@@ -1,0 +1,18 @@
+{
+  "unit_tests": "9/9 pass (node --test)",
+  "real_figure_fig3_crop": {
+    "ratio": 2.3,
+    "coverage": 0.35,
+    "note": "Fig 3 波形带困难裁剪；论文图示≈2.7"
+  },
+  "browser_demo_e2e": {
+    "ratio": 2.507,
+    "hr": 75.0,
+    "qm": 56.3,
+    "pi": 1.14,
+    "coverage": 0.984,
+    "quality": 0.992,
+    "class": "patent"
+  },
+  "screenshot": "test/e2e-desktop.png"
+}

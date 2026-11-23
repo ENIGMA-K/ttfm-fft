@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TTFM FFT 分析 · 科研原型</title>
+<style>
+  :root{
+    --bg:#f4f6f8; --surface:#ffffff; --ink:#12202e; --muted:#5b6b7a;
+    --line:#dbe3ea; --accent:#0f6b8f; --accent-2:#0a4f6a;
+    --ok:#177a53; --warn:#a46800; --bad:#a63030;
+    --ok-bg:#e5f4ec; --warn-bg:#fbf1dd; --bad-bg:#f9e7e7;
+    --radius:14px; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(16,32,48,.06),0 8px 24px rgba(16,32,48,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",Roboto,"Noto Sans SC",sans-serif;-webkit-font-smoothing:antialiased}
+  header{padding:20px 18px 8px;max-width:880px;margin:0 auto}
+  h1{font-size:21px;margin:0 0 6px;letter-spacing:.2px}
+  .badge{display:inline-block;margin:0;padding:3px 9px;border-radius:999px;background:var(--warn-bg);color:var(--warn);font-size:12px;font-weight:600}
+  main{max-width:880px;margin:0 auto;padding:10px 18px 40px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin:12px 0}
+  .upload-zone{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:150px;border:2px dashed #b9c8d4;border-radius:12px;cursor:pointer;text-align:center;padding:18px;color:var(--muted);transition:border-color .15s}
+  .upload-zone:active{border-color:var(--accent)}
+  .upload-zone strong{color:var(--accent);font-size:17px}
+  input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  .hint{color:var(--muted);font-size:13px;margin:10px 0 0}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;padding:9px 14px;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button:active{transform:translateY(1px)}
+  .verdict{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:14px;border-radius:12px;background:#f7fafc;border:1px solid var(--line)}
+  .ratio{font-family:var(--mono);font-size:44px;font-weight:700;line-height:1;letter-spacing:-1px}
+  .chip{display:inline-block;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600}
+  .chip.ok{background:var(--ok-bg);color:var(--ok)} .chip.warn{background:var(--warn-bg);color:var(--warn)} .chip.bad{background:var(--bad-bg);color:var(--bad)}
+  .sub{color:var(--muted);font-size:13px;margin-top:4px}
+  canvas{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--line);background:#fff;touch-action:none}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:12px 0}
+  .metric{background:#f7fafc;border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+  .metric b{display:block;font-family:var(--mono);font-size:19px;margin-top:2px}
+  .metric span{font-size:12px;color:var(--muted)}
+  h2{font-size:15px;margin:18px 0 8px;color:var(--accent-2);letter-spacing:.2px}
+  details{margin-top:10px;color:var(--muted);font-size:13px}
+  summary{cursor:pointer;color:var(--accent);font-weight:600}
+  .field{display:flex;align-items:center;gap:8px;margin:7px 0;flex-wrap:wrap}
+  .field label{min-width:118px;color:var(--muted);font-size:13px}
+  .field input{width:96px;font:14px var(--mono);padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .fail{background:var(--bad-bg);border-color:#eecaca}
+  .fail h2{color:var(--bad)}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#12202e;color:#fff;padding:9px 16px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9}
+  .toast.show{opacity:1}
+  footer{max-width:880px;margin:0 auto;padding:0 18px 26px;color:var(--muted);font-size:12px;line-height:1.6}
+  .status{font-size:13px;color:var(--muted);margin:10px 0 0}
+  .handle-note{font-size:12px;color:var(--muted);margin-top:6px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:6px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+</style>
+</head>
+<body>
+<header>
+  <h1>TTFM 波形 FFT 分析</h1>
+  <p class="badge">科研 / 教学原型 · 非医疗器械 · 不用于临床决策</p>
+</header>
+<main>
+  <section id="uploadCard" class="card">
+    <label class="upload-zone" for="fileInput">
+      <strong>拍照或选择流量波形截图</strong>
+      <span>自动识别波形、坐标轴并计算 FFT 比值（F0/H1）</span>
+      <span>图像仅在本机处理，不上传网络</span>
+    </label>
+    <input id="fileInput" type="file" accept="image/*" capture="environment">
+    <p class="hint">建议正对屏幕拍摄、避免反光与裁切掉扫描窗口；请勿包含患者姓名等信息。算法近似设备内部 FFT，结果为估算值。</p>
+    <div class="row" style="margin-top:10px">
+      <button id="demoBtn">载入示例波形</button>
+      <button id="resetBtn">清空</button>
+    </div>
+    <p id="statusText" class="status" aria-live="polite"></p>
+  </section>
+
+  <section id="failCard" class="card fail" hidden>
+    <h2>识别失败</h2>
+    <p id="failMsg"></p>
+    <div class="row">
+      <button id="retryBtn" class="primary">重新选择图片</button>
+      <button id="openAdjustFail">手动框选 / 调整</button>
+    </div>
+  </section>
+
+  <section id="resultCard" class="card" hidden>
+    <div class="verdict">
+      <div>
+        <div class="ratio" id="ratioText">—</div>
+        <div class="sub">FFT 比值 = F0 / H1</div>
+      </div>
+      <div>
+        <span class="chip" id="classChip">—</span>
+        <div class="sub" id="qualityText">—</div>
+      </div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><span>估算心率</span><b id="hrText">—</b></div>
+      <div class="metric"><span>Qm（估算）</span><b id="qmText">—</b></div>
+      <div class="metric"><span>PI（估算）</span><b id="piText">—</b></div>
+      <div class="metric"><span>心搏周期数</span><b id="cyclesText">—</b></div>
+    </div>
+    <h2>提取波形与坐标轴</h2>
+    <canvas id="previewCanvas"></canvas>
+    <p class="handle-note">绿色 = 提取波形；蓝色横轴 = x 轴（两端为时间手柄）；橙色纵轴 = y 轴（上下为幅值手柄）。拖动圆点可微调。</p>
+    <h2>频谱（F0 / H1）</h2>
+    <canvas id="spectrumCanvas"></canvas>
+    <div class="legend"><span><i style="background:#0f6b8f"></i>F0 基频</span><span><i style="background:#a46800"></i>H1 一次谐波</span></div>
+    <div class="row" style="margin-top:12px">
+      <button id="adjustBtn" class="primary">轴调整</button>
+      <button id="resetAxesBtn">恢复自动识别</button>
+      <button id="newImageBtn">换一张</button>
+    </div>
+    <details id="techDetails"><summary>技术细节</summary><div id="techBody"></div></details>
+  </section>
+
+  <section id="axisCard" class="card" hidden>
+    <h2>坐标轴微调（实时重算）</h2>
+    <div class="field"><label>x 左端时间（s）</label><input id="xT0" type="number" step="0.01"><label>x 右端时间（s）</label><input id="xT1" type="number" step="0.01"></div>
+    <div class="field"><label>y 下参考值</label><input id="yV0" type="number" step="1"><label>y 上参考值</label><input id="yV1" type="number" step="1"></div>
+    <p class="hint">x 轴用于心率换算（不影响 FFT 比值）；y 轴用于 Qm/PI 估算。留空表示未标定。拖动预览图上的手柄也会更新这里。</p>
+    <div class="row"><button id="applyAxisBtn" class="primary">应用</button><button id="closeAxisBtn">收起</button></div>
+  </section>
+</main>
+<footer>
+  <p><strong>免责声明：</strong>本工具为科研与教学原型，用于学习 Takami 2024 提出的 TTFM 波形 FFT 分析方法（FFT 比值 = 基频功率/一次谐波功率，≥1.0 提示桥血管通畅倾向，&lt;1.0 提示吻合口问题可能）。它不是医疗器械，结果未经临床验证，不得用于临床诊断、治疗或手术决策。图像只在本机浏览器内处理，不上传服务器；请勿使用包含患者隐私的图像。</p>
+</footer>
+<div id="toast" class="toast"></div>
+
+<script>
+/* CORE:BEGIN */
+(function (root) {
+  'use strict';
+  const EPS = 1e-12;
+
+  /* ---------- 基础工具 ---------- */
+  function nextPow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+  function bitrev(i, bits) { let r = 0; for (let k = 0; k < bits; k++) { r = (r << 1) | (i & 1); i >>= 1; } return r; }
+
+  function fftRadix2(re, im) {
+    const n = re.length;
+    const bits = Math.round(Math.log2(n));
+    if ((1 << bits) !== n) throw new Error('FFT size must be power of 2');
+    for (let i = 0; i < n; i++) {
+      const j = bitrev(i, bits);
+      if (j > i) {
+        let t = re[i]; re[i] = re[j]; re[j] = t;
+        t = im[i]; im[i] = im[j]; im[j] = t;
+      }
+    }
+    for (let size = 2; size <= n; size <<= 1) {
+      const half = size >> 1;
+      const step = -2 * Math.PI / size;
+      const wR = new Float64Array(half), wI = new Float64Array(half);
+      for (let k = 0; k < half; k++) { wR[k] = Math.cos(step * k); wI[k] = Math.sin(step * k); }
+      for (let start = 0; start < n; start += size) {
+        for (let k = 0; k < half; k++) {
+          const a = start + k, b = a + half;
+          const xr = re[b] * wR[k] - im[b] * wI[k];
+          const xi = re[b] * wI[k] + im[b] * wR[k];
+          re[b] = re[a] - xr; im[b] = im[a] - xi;
+          re[a] += xr; im[a] += xi;
+        }
+      }
+    }
+  }
+
+  function naiveDFT(re, im) {
+    const n = re.length;
+    const oR = new Float64Array(n), oI = new Float64Array(n);
+    for (let k = 0; k < n; k++) {
+      let sr = 0, si = 0;
+      for (let t = 0; t < n; t++) {
+        const ang = -2 * Math.PI * k * t / n;
+        const c = Math.cos(ang), s = Math.sin(ang);
+        sr += re[t] * c - im[t] * s;
+        si += re[t] * s + im[t] * c;
+      }
+      oR[k] = sr; oI[k] = si;
+    }
+    return { re: oR, im: oI };
+  }
+
+  function detrend(x) {
+    const n = x.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < n; i++) { sx += i; sy += x[i]; sxx += i * i; sxy += i * x[i]; }
+    const den = n * sxx - sx * sx;
+    const a = den ? (n * sxy - sx * sy) / den : 0;
+    const b = (sy - a * sx) / Math.max(1, n);
+    const y = new Float64Array(n);
+    for (let i = 0; i < n; i++) y[i] = x[i] - (a * i + b);
+    return y;
+  }
+
+  function hann(n) {
+    const w = new Float64Array(n);
+    for (let i = 0; i < n; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / Math.max(1, n - 1));
+    return w;
+  }
+
+  function autocorrPeak(x) {
+    const n = x.length;
+    if (n < 16) return null;
+    let e0 = 0; for (let i = 0; i < n; i++) e0 += x[i] * x[i];
+    if (e0 < EPS) return null;
+    const maxLag = Math.floor(n / 2);
+    const r = new Float64Array(maxLag + 1);
+    for (let lag = 2; lag <= maxLag; lag++) {
+      let s = 0, e1 = 0;
+      for (let i = 0; i + lag < n; i++) { s += x[i] * x[i + lag]; e1 += x[i + lag] * x[i + lag]; }
+      r[lag] = s / Math.sqrt(e0 * (e1 + EPS) + EPS);
+    }
+    let best = -1, bestLag = -1;
+    for (let lag = 3; lag <= maxLag; lag++) {
+      const rightOk = lag >= maxLag || r[lag] >= r[lag + 1];
+      if (r[lag] > r[lag - 1] && rightOk && r[lag] > best) { best = r[lag]; bestLag = lag; }
+    }
+    if (best < 0.25 || bestLag < 3) return null;
+    for (let lag = 3; lag <= maxLag; lag++) {
+      const rightOk = lag >= maxLag || r[lag] >= r[lag + 1];
+      if (r[lag] > r[lag - 1] && rightOk && r[lag] > 0.55 * best) return lag;
+    }
+    return bestLag;
+  }
+
+  function powerSpectrum(sig, padTo) {
+    const n = padTo ? nextPow2(Math.max(padTo, sig.length)) : nextPow2(sig.length);
+    const re = new Float64Array(n), im = new Float64Array(n);
+    const w = hann(sig.length);
+    for (let i = 0; i < sig.length; i++) re[i] = sig[i] * w[i];
+    fftRadix2(re, im);
+    const half = n >> 1;
+    const P = new Float64Array(half);
+    for (let k = 0; k < half; k++) P[k] = re[k] * re[k] + im[k] * im[k];
+    return { P, n, half };
+  }
+
+  function median(a) {
+    if (!a.length) return 0;
+    const s = Array.from(a).sort((x, y) => x - y);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+
+  // 最小二乘拟合基频与一次谐波振幅（对频点偏移/泄漏稳健）
+  function harmonicAmplitudes(x, f0, dtSec) {
+    const n = x.length;
+    const B = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+    const rhs = [0, 0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      const t = dtSec ? i * dtSec : i;
+      const s1 = Math.sin(2 * Math.PI * f0 * t), c1 = Math.cos(2 * Math.PI * f0 * t);
+      const s2 = Math.sin(4 * Math.PI * f0 * t), c2 = Math.cos(4 * Math.PI * f0 * t);
+      const row = [s1, c1, s2, c2];
+      for (let a = 0; a < 4; a++) {
+        rhs[a] += row[a] * x[i];
+        for (let b = 0; b < 4; b++) B[a][b] += row[a] * row[b];
+      }
+    }
+    // 高斯消元
+    const M = B.map((r, i) => r.concat([rhs[i]]));
+    for (let col = 0; col < 4; col++) {
+      let piv = col;
+      for (let r = col + 1; r < 4; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+      if (Math.abs(M[piv][col]) < 1e-12) return { a0: 0, a1: 0 };
+      [M[col], M[piv]] = [M[piv], M[col]];
+      for (let r = 0; r < 4; r++) {
+        if (r === col) continue;
+        const f = M[r][col] / M[col][col];
+        for (let c = col; c <= 4; c++) M[r][c] -= f * M[col][c];
+      }
+    }
+    const sol = [0, 0, 0, 0];
+    for (let i = 0; i < 4; i++) sol[i] = M[i][4] / M[i][i];
+    return { a0: Math.hypot(sol[0], sol[1]), a1: Math.hypot(sol[2], sol[3]) };
+  }
+
+  /* ---------- 信号分析 ---------- */
+  function analyzeSignal(sig, dtSec) {
+    const n0 = sig.length;
+    if (n0 < 32) return { ok: false, reason: '有效采样点不足（<32）' };
+    const s = detrend(Float64Array.from(sig));
+    let fa = null;
+    const lag = autocorrPeak(s);
+    if (lag) fa = 1 / lag;
+
+    const { P, n, half } = powerSpectrum(s, 4096);
+    const df = dtSec ? 1 / (n * dtSec) : 1 / n;
+    let fLo, fHi;
+    if (dtSec) {
+      fLo = 0.45; fHi = 2.2; // 默认 27–132 bpm
+      const fEst = fa ? fa / dtSec : null; // 自相关估计的 Hz（fa 为 cycles/sample）
+      if (fEst && isFinite(fEst)) {
+        fLo = Math.max(0.25, Math.min(fLo, fEst * 0.6));
+        fHi = Math.min(4.5, Math.max(fHi, fEst * 1.8));
+      }
+    } else {
+      const ref = fa || 0.08;
+      fLo = Math.max(2.5 / n, ref * 0.5);
+      fHi = Math.min(0.45, ref * 2.0);
+      if (fHi <= fLo) fHi = Math.min(0.45, fLo * 2.2);
+    }
+
+    function bandStats(freq) {
+      const c = Math.round(freq / df);
+      const sLo = Math.max(1, c - 4), sHi = Math.min(half - 2, c + 4);
+      let best = -1, bk = sLo;
+      for (let k = sLo; k <= sHi; k++) if (P[k] > best) { best = P[k]; bk = k; }
+      const lo = Math.max(1, bk - 3), hi = Math.min(half - 2, bk + 3);
+      let sum = 0;
+      for (let k = lo; k <= hi; k++) sum += P[k];
+      let delta = 0;
+      if (bk > 0 && bk < half - 1) {
+        const y0 = Math.log(P[bk - 1] + EPS), y1 = Math.log(P[bk] + EPS), y2 = Math.log(P[bk + 1] + EPS);
+        const den = y0 - 2 * y1 + y2;
+        delta = Math.abs(den) > EPS ? 0.5 * (y0 - y2) / den : 0;
+        if (!isFinite(delta) || Math.abs(delta) > 1) delta = 0;
+      }
+      return { power: sum, peak: best, freq: (bk + delta) * df, k: bk };
+    }
+
+    const loBin = Math.max(2, Math.ceil(fLo / df));
+    const hiBin = Math.min(half - 3, Math.floor(fHi / df));
+    let best = null;
+    for (let bi = loBin; bi <= hiBin; bi++) {
+      const f = bi * df;
+      if (2 * f >= (half - 2) * df) continue;
+      const A = bandStats(f), B2 = bandStats(2 * f);
+      if (!(B2.power >= 0)) continue;
+      let score = Math.log(A.power + EPS) + Math.log(B2.power + EPS);
+      if (f / 2 >= fLo * 0.9) {
+        const halfBand = bandStats(f / 2);
+        if (halfBand.power > 0.6 * A.power) score -= 2.5;
+      }
+      if (!best || score > best.score) best = { score, f, A, B2 };
+    }
+    if (!best) return { ok: false, reason: '未找到有效谐波对' };
+
+    const f0 = best.A.freq;
+    const amps = harmonicAmplitudes(s, f0, dtSec);
+    const ratio = Math.min(99, Math.pow(amps.a0 / Math.max(EPS, amps.a1), 2));
+    const durationSec = dtSec ? n0 * dtSec : n0;
+    const cycles = f0 * durationSec;
+    const hr = dtSec ? f0 * 60 : null;
+
+    const bandVals = [];
+    for (let k = loBin; k <= hiBin; k++) if (Math.abs(k - best.A.k) > 3 && Math.abs(k - Math.round(2 * f0 / df)) > 3) bandVals.push(P[k]);
+    const bg = Math.max(EPS, median(bandVals));
+    const snr = Math.pow(best.A.power / bg, 0.5);
+
+    const mid = Math.floor(n0 / 2);
+    function halfRatio(arr) {
+      const d = detrend(Float64Array.from(arr));
+      const hm = harmonicAmplitudes(d, f0, dtSec);
+      return Math.pow(hm.a0 / Math.max(EPS, hm.a1), 2);
+    }
+    let halfDiff = 0;
+    if (mid >= 32) {
+      const r1 = halfRatio(s.slice(0, mid)), r2 = halfRatio(s.slice(mid));
+      halfDiff = Math.abs(r1 - r2) / (r1 + r2 + EPS);
+    }
+
+    const warn = dtSec && hr && (hr < 30 || hr > 200) ? '心率超出 30–200 bpm，比值存疑' : null;
+    return {
+      ok: true, ratio, f0, f0Hz: dtSec ? f0 : null, hr, warn,
+      b0: amps.a0 * amps.a0, b1: amps.a1 * amps.a1,
+      cycles, snr, halfDiff, df, durationSec
+    };
+  }
+
+  function qualityScore(tr, an) {
+    const cov = clamp01((tr.coverage - 0.55) / 0.4);
+    const cyc = an && an.ok ? clamp01(an.cycles / 4) : 0;
+    const snr = an && an.ok ? clamp01((an.snr - 1.5) / 5) : 0;
+    const half = an && an.ok ? clamp01(1 - an.halfDiff / 0.5) : 0;
+    const amp = clamp01(tr.ppAmp / 28);
+    const q = 0.30 * cov + 0.25 * cyc + 0.25 * snr + 0.10 * half + 0.10 * amp;
+    return { score: q, coverage: cov, cycles: cyc, snr, halves: half, amplitude: amp };
+  }
+
+  function classify(ratio) {
+    if (!(ratio > 0)) return { key: 'unknown', label: '无法判定', cls: 'warn' };
+    if (ratio >= 1.1) return { key: 'patent', label: '科研估算：倾向通畅（≥1.1）', cls: 'ok' };
+    if (ratio >= 0.9) return { key: 'critical', label: '科研估算：临界（0.9–1.1）', cls: 'warn' };
+    return { key: 'suspect', label: '科研估算：疑似吻合口问题（<0.9）', cls: 'bad' };
+  }
+
+  /* ---------- 图像与曲线提取 ---------- */
+  function pixel(rgba, W, x, y) {
+    const i = (y * W + x) * 4;
+    return [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
+  }
+
+  function detectPanels(rgba, W, H) {
+    const ds = 4;
+    const w = Math.ceil(W / ds), h = Math.ceil(H / ds);
+    const blue = new Uint8Array(w * h), dark = new Uint8Array(w * h);
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        let hasBlue = false, hasDark = false;
+        for (let dy = 0; dy < ds && !hasBlue; dy++) {
+          for (let dx = 0; dx < ds && !hasBlue; dx++) {
+            const x = Math.min(W - 1, xx * ds + dx), y = Math.min(H - 1, yy * ds + dy);
+            const p = pixel(rgba, W, x, y);
+            const r = p[0], g = p[1], b = p[2], a = p[3];
+            if (a < 40) continue;
+            const mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx - mn;
+            const luma = (r * 299 + g * 587 + b * 114) / 1000;
+            const isRed = r > 120 && r > g + 35 && r > b + 35;
+            if (sat > 55 && !isRed && (b > 80 || g > 80)) hasBlue = true;
+            else if (luma < 110 && sat < 70) hasDark = true;
+          }
+        }
+        if (hasBlue) blue[yy * w + xx] = 1;
+        else if (hasDark) dark[yy * w + xx] = 1;
+      }
+    }
+    function components(mask) {
+      const seen = new Uint8Array(w * h), out = [];
+      const stack = [];
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i] || seen[i]) continue;
+        let count = 0, x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+        seen[i] = 1; stack.length = 0; stack.push(i);
+        while (stack.length) {
+          const j = stack.pop();
+          const yy = (j / w) | 0, xx = j % w;
+          count++;
+          if (xx < x0) x0 = xx; if (xx > x1) x1 = xx;
+          if (yy < y0) y0 = yy; if (yy > y1) y1 = yy;
+          const nb = [j - 1, j + 1, j - w, j + w];
+          for (let t = 0; t < 4; t++) {
+            const k = nb[t];
+            if (k < 0 || k >= mask.length) continue;
+            if (t < 2 && Math.abs(((k / w) | 0) - yy) > 0) continue;
+            if (!seen[k] && mask[k]) { seen[k] = 1; stack.push(k); }
+          }
+        }
+        if (count >= 12) out.push({ count, x0, x1, y0, y1, bw: x1 - x0 + 1, bh: y1 - y0 + 1 });
+      }
+      return out;
+    }
+    const cc = components(blue).filter(c => c.bw * ds >= W * 0.12 && c.bh * ds >= H * 0.06);
+    const dc = components(dark).filter(c => c.bw * ds >= W * 0.18 && c.bh * ds >= H * 0.08);
+    const list = (cc.length ? cc : dc).map(c => {
+      const area = c.bw * c.bh;
+      const aspect = c.bw / Math.max(1, c.bh);
+      const density = c.count / Math.max(1, area);
+      const score = density * 2 + Math.min(1.5, aspect / 3) + Math.min(1, (c.bw * ds) / W);
+      return {
+        rect: {
+          x: Math.max(0, c.x0 * ds - 4), y: Math.max(0, c.y0 * ds - 4),
+          w: Math.min(W, (c.bw + 2) * ds), h: Math.min(H, (c.bh + 2) * ds)
+        },
+        score, kind: cc.length ? 'colored' : 'dark'
+      };
+    }).sort((a, b) => b.score - a.score);
+    return list.slice(0, 3);
+  }
+
+  function extractTrace(rgba, W, H, rect, opts) {
+    const o = Object.assign({ mode: 'auto', jumpFrac: 0.09 }, opts || {});
+    const x0 = Math.max(0, rect.x | 0), y0 = Math.max(0, rect.y | 0);
+    const x1 = Math.min(W - 1, (rect.x + rect.w) | 0), y1 = Math.min(H - 1, (rect.y + rect.h) | 0);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w < 24 || h < 24) return { ok: false, reason: '波形区域过小' };
+    const N = w * h;
+    const colored = new Uint8Array(N), dark = new Uint8Array(N);
+    let coloredCount = 0, darkCount = 0;
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        const p = pixel(rgba, W, x0 + xx, y0 + yy);
+        const r = p[0], g = p[1], b = p[2], a = p[3];
+        if (a < 40) continue;
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx - mn;
+        const luma = (r * 299 + g * 587 + b * 114) / 1000;
+        const isRed = r > 120 && r > g + 35 && r > b + 35;
+        const isColored = sat > 55 && !isRed && (b > 80 || g > 80) && !(g > 160 && r > 160 && b < 110);
+        const isDark = luma < 115 && sat < 70;
+        const idx = yy * w + xx;
+        if (isColored) { colored[idx] = 1; coloredCount++; }
+        else if (isDark) { dark[idx] = 1; darkCount++; }
+      }
+    }
+    let mode = o.mode;
+    if (mode === 'auto') mode = coloredCount > Math.max(120, darkCount * 0.3) ? 'colored' : 'dark';
+    const mask = mode === 'colored' ? colored : dark;
+    const rowCnt = new Int32Array(h), colCnt = new Int32Array(w);
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+      if (mask[yy * w + xx]) { rowCnt[yy]++; colCnt[xx]++; }
+    }
+    const segs = [];
+    for (let xx = 0; xx < w; xx++) {
+      if (colCnt[xx] > 0.65 * h) { segs.push(null); continue; }
+      const list = [];
+      let start = -1;
+      for (let yy = 0; yy <= h; yy++) {
+        const v = yy < h && mask[yy * w + xx] && rowCnt[yy] < 0.55 * w;
+        if (v && start < 0) start = yy;
+        else if (!v && start >= 0) {
+          const len = yy - start;
+          if (len >= 1) list.push({ y: (start + yy - 1) / 2, len });
+          start = -1;
+        }
+      }
+      segs.push(list.length ? list : null);
+    }
+    const maxJump = Math.max(2, Math.round(h * o.jumpFrac));
+    const colStates = new Array(w).fill(null);
+    const colFrom = new Array(w).fill(null);
+    let prev = null;
+    for (let cxx = 0; cxx < w; cxx++) {
+      const cur = segs[cxx];
+      if (!cur) { if (prev) prev.costs = prev.costs.map(v => v + 0.8); continue; }
+      const costs = new Float64Array(cur.length);
+      const from = new Int32Array(cur.length).fill(-1);
+      if (!prev) {
+        for (let j = 0; j < cur.length; j++) costs[j] = -0.02 * cur[j].len;
+      } else {
+        for (let j = 0; j < cur.length; j++) {
+          let bestC = Infinity, bestK = -1;
+          for (let k = 0; k < prev.states.length; k++) {
+            const d = Math.abs(cur[j].y - prev.states[k].y);
+            const c = prev.costs[k] + (d <= maxJump ? d * 0.06 : 2 + d * 0.4) - 0.015 * cur[j].len;
+            if (c < bestC) { bestC = c; bestK = k; }
+          }
+          costs[j] = bestC; from[j] = bestK;
+        }
+      }
+      colStates[cxx] = cur; colFrom[cxx] = from;
+      prev = { states: cur, costs };
+    }
+    let lastC = -1;
+    for (let cxx = w - 1; cxx >= 0; cxx--) if (colStates[cxx]) { lastC = cxx; break; }
+    if (lastC < 0) return { ok: false, reason: '未检测到波形曲线' };
+    let kBest = 0; let bestCost = Infinity;
+    const lastStates = colStates[lastC];
+    for (let j = 0; j < lastStates.length; j++) {
+      const c = prev && prev.states === lastStates ? prev.costs[j] : 0;
+      if (c < bestCost) { bestCost = c; kBest = j; }
+    }
+    const yCols = new Float64Array(w).fill(NaN);
+    let k = kBest;
+    for (let cxx = lastC; cxx >= 0; cxx--) {
+      if (!colStates[cxx]) continue;
+      const st = colStates[cxx][k];
+      if (st) yCols[cxx] = y0 + st.y;
+      const from = colFrom[cxx];
+      if (!from) break;
+      k = from[k];
+      if (k < 0) break;
+    }
+    let valid = 0;
+    for (let i = 0; i < w; i++) if (isFinite(yCols[i])) valid++;
+    const coverage = valid / w;
+    const med = new Float64Array(w).fill(NaN);
+    for (let i = 0; i < w; i++) {
+      const win = [];
+      for (let d = -1; d <= 1; d++) { const j = i + d; if (j >= 0 && j < w && isFinite(yCols[j])) win.push(yCols[j]); }
+      if (win.length) med[i] = median(win);
+    }
+    let first = -1, last = -1;
+    for (let i = 0; i < w; i++) if (isFinite(med[i])) { if (first < 0) first = i; last = i; }
+    if (first < 0) return { ok: false, reason: '曲线覆盖为零' };
+    for (let i = first; i <= last; i++) {
+      if (isFinite(med[i])) continue;
+      let a = i - 1; while (a >= first && !isFinite(med[a])) a--;
+      let b = i + 1; while (b <= last && !isFinite(med[b])) b++;
+      if (a >= first && b <= last) med[i] = med[a] + (med[b] - med[a]) * (i - a) / (b - a);
+      else if (a >= first) med[i] = med[a];
+      else if (b <= last) med[i] = med[b];
+    }
+    let mn = Infinity, mx = -Infinity;
+    for (let i = first; i <= last; i++) { mn = Math.min(mn, med[i]); mx = Math.max(mx, med[i]); }
+    return {
+      ok: true, mode, x0, y0, w, h, first, last,
+      y: med, coverage, ppAmp: mx - mn,
+      medianY: median(Array.from(med.slice(first, last + 1)))
+    };
+  }
+
+  /* ---------- 字符模板与数字 OCR（尽力而为） ---------- */
+  const FONT5x7 = {
+    '0': [14, 17, 19, 21, 25, 17, 14], '1': [4, 12, 4, 4, 4, 4, 14],
+    '2': [14, 17, 1, 2, 4, 8, 31], '3': [31, 2, 4, 2, 1, 17, 14],
+    '4': [2, 6, 10, 18, 31, 2, 2], '5': [31, 16, 30, 1, 1, 17, 14],
+    '6': [6, 8, 16, 30, 17, 17, 14], '7': [31, 1, 2, 4, 8, 8, 8],
+    '8': [14, 17, 17, 14, 17, 17, 14], '9': [14, 17, 17, 15, 1, 2, 12],
+    '.': [0, 0, 0, 0, 0, 12, 12], '-': [0, 0, 0, 31, 0, 0, 0]
+  };
+
+  function glyphFromMask(mask, w, h, x0, x1, y0, y1) {
+    const gw = x1 - x0 + 1, gh = y1 - y0 + 1;
+    const g = new Uint8Array(gw * gh);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) g[(y - y0) * gw + (x - x0)] = mask[y * w + x] ? 1 : 0;
+    return { g, gw, gh };
+  }
+
+  function matchGlyph(g, gw, gh) {
+    let bestChar = '', bestScore = 0;
+    for (const ch in FONT5x7) {
+      const rows = FONT5x7[ch];
+      let inter = 0, uni = 0;
+      for (let y = 0; y < gh; y++) {
+        const fy = Math.min(6, Math.floor(y * 7 / gh));
+        for (let x = 0; x < gw; x++) {
+          const fx = Math.min(4, Math.floor(x * 5 / gw));
+          const tv = (rows[fy] >> (4 - fx)) & 1;
+          const gv = g[y * gw + x];
+          if (tv && gv) inter++;
+          if (tv || gv) uni++;
+        }
+      }
+      const score = uni ? inter / uni : 0;
+      if (score > bestScore) { bestScore = score; bestChar = ch; }
+    }
+    return { ch: bestChar, score: bestScore };
+  }
+
+  function findTextTokens(rgba, W, H, region) {
+    const rx0 = Math.max(0, region.x0 | 0), ry0 = Math.max(0, region.y0 | 0);
+    const rx1 = Math.min(W - 1, region.x1 | 0), ry1 = Math.min(H - 1, region.y1 | 0);
+    const w = rx1 - rx0 + 1, h = ry1 - ry0 + 1;
+    if (w < 4 || h < 4) return [];
+    const mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const p = pixel(rgba, W, rx0 + x, ry0 + y);
+      const luma = (p[0] * 299 + p[1] * 587 + p[2] * 114) / 1000;
+      const sat = Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2]);
+      if (luma < 120 && sat < 80) mask[y * w + x] = 1;
+    }
+    const seen = new Uint8Array(w * h), comps = [];
+    const stack = [];
+    for (let i = 0; i < mask.length; i++) {
+      if (!mask[i] || seen[i]) continue;
+      let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1, cnt = 0;
+      seen[i] = 1; stack.push(i);
+      while (stack.length) {
+        const j = stack.pop(); const yy = (j / w) | 0, xx = j % w;
+        cnt++; x0 = Math.min(x0, xx); x1 = Math.max(x1, xx); y0 = Math.min(y0, yy); y1 = Math.max(y1, yy);
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const nx = xx + dx, ny = yy + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+            const kk = ny * w + nx;
+            if (!seen[kk] && mask[kk]) { seen[kk] = 1; stack.push(kk); }
+          }
+        }
+      }
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      if (cnt >= 4 && bh >= 4 && bh <= Math.max(8, h * 0.5) && bw <= Math.max(4, bh * 2.2)) {
+        comps.push({ x0, x1, y0, y1, bw, bh, cnt });
+      }
+    }
+    if (!comps.length) return [];
+    comps.sort((a, b) => a.y0 - b.y0);
+    const groups = [];
+    for (const c of comps) {
+      let g = null;
+      for (const gr of groups) {
+        const base = median(gr.map(q => q.y1));
+        if (Math.abs(c.y1 - base) <= Math.max(2, 0.45 * c.bh)) { g = gr; break; }
+      }
+      if (!g) { g = []; groups.push(g); }
+      g.push(c);
+    }
+    const tokens = [];
+    for (const g of groups) {
+      g.sort((a, b) => a.x0 - b.x0);
+      const medH = median(g.map(c => c.bh));
+      let cur = [];
+      const flush = () => {
+        if (!cur.length) return;
+        const text = [];
+        const sx0 = cur[0].x0, sx1 = cur[cur.length - 1].x1;
+        const sy0 = Math.min(...cur.map(c => c.y0)), sy1 = Math.max(...cur.map(c => c.y1));
+        for (const c of cur) {
+          const gl = glyphFromMask(mask, w, h, c.x0, c.x1, c.y0, c.y1);
+          const m = matchGlyph(gl.g, gl.gw, gl.gh);
+          if (m.score < 0.5) { cur = []; return; }
+          text.push(m.ch);
+        }
+        const val = parseFloat(text.join(''));
+        if (isFinite(val)) {
+          tokens.push({ value: val, text: text.join(''), cx: rx0 + (sx0 + sx1) / 2, cy: ry0 + (sy0 + sy1) / 2, h: sy1 - sy0 + 1 });
+        }
+        cur = [];
+      };
+      for (const c of g) {
+        if (cur.length && (c.x0 - cur[cur.length - 1].x1) > 0.9 * medH) flush();
+        cur.push(c);
+      }
+      flush();
+    }
+    return tokens;
+  }
+
+  function fitLinear(pts) {
+    const n = pts.length;
+    if (n < 2) return null;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (const p of pts) { sx += p.px; sy += p.val; sxx += p.px * p.px; sxy += p.px * p.val; }
+    const den = n * sxx - sx * sx;
+    if (Math.abs(den) < 1e-9) return null;
+    const a = (n * sxy - sx * sy) / den;
+    const b = (sy - a * sx) / n;
+    return { a, b };
+  }
+
+  function detectAxes(rgba, W, H, rect, trace) {
+    const x0 = Math.max(0, rect.x | 0), y0 = Math.max(0, rect.y | 0);
+    const x1 = Math.min(W - 1, (rect.x + rect.w) | 0), y1 = Math.min(H - 1, (rect.y + rect.h) | 0);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    const dark = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const p = pixel(rgba, W, x0 + x, y0 + y);
+      const luma = (p[0] * 299 + p[1] * 587 + p[2] * 114) / 1000;
+      const sat = Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2]);
+      if (luma < 120 && sat < 80) dark[y * w + x] = 1;
+    }
+    const colCnt = new Int32Array(w), rowCnt = new Int32Array(h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (dark[y * w + x]) { colCnt[x]++; rowCnt[y]++; }
+    let yAxisX = -1, bestC = 0;
+    for (let x = 0; x < Math.floor(w * 0.45); x++) if (colCnt[x] > bestC) { bestC = colCnt[x]; yAxisX = x; }
+    if (bestC < 0.5 * h) yAxisX = -1;
+    let xAxisY = -1, bestR = 0;
+    for (let y = Math.floor(h * 0.5); y < h; y++) if (rowCnt[y] > bestR) { bestR = rowCnt[y]; xAxisY = y; }
+    if (bestR < 0.45 * w) xAxisY = -1;
+    let zeroY = null;
+    if (trace && isFinite(trace.medianY)) {
+      const my = trace.medianY - y0;
+      let best = Infinity;
+      for (let y = 0; y < h; y++) {
+        if (rowCnt[y] > 0.5 * w && Math.abs(y - my) < best) { best = Math.abs(y - my); zeroY = y0 + y; }
+      }
+    }
+    const yPad = Math.max(30, Math.round(H * 0.22));
+    const xPad = Math.max(30, Math.round(W * 0.22));
+    const xLabels = findTextTokens(rgba, W, H, {
+      x0, x1, y0: xAxisY >= 0 ? Math.min(H - 1, y0 + xAxisY + 2) : Math.min(H - 1, y0 + Math.floor(h * 0.75)),
+      y1: Math.min(H - 1, y1 + yPad)
+    });
+    const yLabels = findTextTokens(rgba, W, H, {
+      x0: Math.max(0, x0 - xPad), x1: yAxisX >= 0 ? Math.max(0, x0 + yAxisX - 2) : x0 + Math.floor(w * 0.3),
+      y0: Math.max(0, y0 - yPad), y1: Math.min(H - 1, y1 + yPad)
+    });
+    let calX = null, calY = null;
+    if (xLabels.length >= 2) {
+      const fit = fitLinear(xLabels.map(t => ({ px: t.cx, val: t.value })));
+      if (fit && Math.abs(fit.a) > 1e-6) {
+        calX = { a: fit.a, b: fit.b, pxPerSec: 1 / Math.abs(fit.a), labels: xLabels.map(t => ({ px: t.cx, t: t.value })) };
+      }
+    }
+    if (yLabels.length >= 2) {
+      const fit = fitLinear(yLabels.map(t => ({ px: t.cy, val: t.value })));
+      if (fit && Math.abs(fit.a) > 1e-6) {
+        calY = { a: fit.a, b: fit.b, labels: yLabels.map(t => ({ px: t.cy, v: t.value })), zeroPx: -fit.b / fit.a };
+      }
+    }
+    return {
+      xAxisY: xAxisY >= 0 ? y0 + xAxisY : null,
+      yAxisX: yAxisX >= 0 ? x0 + yAxisX : null,
+      zeroY, calX, calY, xLabels, yLabels
+    };
+  }
+
+  function calcQmPI(values) {
+    let n = 0, sum = 0, mn = Infinity, mx = -Infinity;
+    for (const v of values) {
+      if (!isFinite(v)) continue;
+      n++; sum += v; mn = Math.min(mn, v); mx = Math.max(mx, v);
+    }
+    if (!n) return { qm: NaN, pi: NaN, qmax: NaN, qmin: NaN };
+    const qm = sum / n;
+    return { qm, pi: qm !== 0 ? (mx - mn) / Math.abs(qm) : NaN, qmax: mx, qmin: mn };
+  }
+
+  root.TTFMCore = {
+    nextPow2, fftRadix2, naiveDFT, detrend, hann, powerSpectrum, autocorrPeak,
+    analyzeSignal, qualityScore, classify, median,
+    detectPanels, extractTrace, detectAxes, findTextTokens, calcQmPI,
+    FONT5x7
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+/* CORE:END */
+
+/* ================= UI ================= */
+(function () {
+  'use strict';
+  const C = window.TTFMCore;
+  const $ = id => document.getElementById(id);
+  const state = {
+    img: null, W: 0, H: 0, rgba: null,
+    panel: null, trace: null, axes: null, analysis: null,
+    calX: null, calY: null,
+    autoCalX: null, autoCalY: null, quality: null
+  };
+
+  function toast(msg) {
+    const el = $('toast'); el.textContent = msg; el.classList.add('show');
+    clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+  function setStatus(t) { $('statusText').textContent = t || ''; }
+
+  function loadImageBitmapFromFile(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const im = new Image();
+      im.onload = () => { URL.revokeObjectURL(url); resolve(im); };
+      im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片解码失败')); };
+      im.src = url;
+    });
+  }
+
+  async function handleFile(file) {
+    try {
+      setStatus('正在载入图像…');
+      const im = await loadImageBitmapFromFile(file);
+      const scale = Math.min(1, 1400 / Math.max(im.width, im.height));
+      const W = Math.max(1, Math.round(im.width * scale)), H = Math.max(1, Math.round(im.height * scale));
+      const cv = document.createElement('canvas');
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(im, 0, 0, W, H);
+      state.img = im; state.W = W; state.H = H;
+      state.rgba = ctx.getImageData(0, 0, W, H).data;
+      runPipeline();
+    } catch (e) {
+      setStatus('');
+      showFail(e.message || '无法读取图像');
+    }
+  }
+
+  function showFail(msg) {
+    $('resultCard').hidden = true; $('axisCard').hidden = true;
+    $('failCard').hidden = false; $('failMsg').textContent = msg;
+  }
+
+  function runPipeline() {
+    const { rgba, W, H } = state;
+    setStatus('正在识别波形区域…');
+    const panels = C.detectPanels(rgba, W, H);
+    if (!panels.length) { showFail('未找到波形绘图区。请让波形充满画面、避免模糊或强反光。'); setStatus(''); return; }
+    const panel = panels[0];
+    setStatus('正在提取波形曲线…');
+    const tr = C.extractTrace(rgba, W, H, panel.rect, { mode: 'auto' });
+    if (!tr.ok) { showFail('波形提取失败：' + tr.reason); setStatus(''); return; }
+    if (tr.coverage < 0.5 || tr.ppAmp < 10) { showFail('波形不完整或幅度过低（覆盖 ' + (tr.coverage * 100).toFixed(0) + '%）。建议重新拍摄或手动框选。'); setStatus(''); return; }
+    setStatus('正在识别坐标轴…');
+    const axes = C.detectAxes(rgba, W, H, panel.rect, tr);
+    state.panel = panel; state.trace = tr; state.axes = axes;
+    state.autoCalX = makeCalXFromAxes(axes, panel.rect);
+    state.autoCalY = makeCalYFromAxes(axes);
+    state.calX = state.autoCalX ? { ...state.autoCalX } : null;
+    state.calY = state.autoCalY ? { ...state.autoCalY } : null;
+    state._view = null;
+    recompute(true);
+  }
+
+  function makeCalXFromAxes(axes, rect) {
+    if (axes.calX) {
+      const p0 = rect.x, p1 = rect.x + rect.w;
+      const t0 = axes.calX.a * p0 + axes.calX.b;
+      const t1 = axes.calX.a * p1 + axes.calX.b;
+      if (t1 > t0) return { p0, t0, p1, t1 };
+    }
+    return null;
+  }
+  function makeCalYFromAxes(axes) {
+    if (axes.calY) {
+      const p0 = axes.calY.zeroPx, v0 = 0;
+      const p1 = axes.calY.zeroPx - 100, v1 = axes.calY.a * p1 + axes.calY.b;
+      if (isFinite(p1) && isFinite(v1) && v1 !== v0) return { p0, v0, p1, v1 };
+    }
+    return null;
+  }
+
+  function signalFromTrace() {
+    const { trace, calY } = state;
+    const ys = [], xs = [];
+    for (let i = trace.first; i <= trace.last; i++) {
+      const y = trace.y[i]; if (!isFinite(y)) continue;
+      xs.push(i);
+      ys.push(calY ? (calY.v0 + (y - calY.p0) * (calY.v1 - calY.v0) / ((calY.p1 - calY.p0) || 1)) : -y);
+    }
+    return { xs, ys };
+  }
+
+  function spacingSec() {
+    const { calX } = state;
+    if (!calX) return null;
+    const pxPerSec = (calX.p1 - calX.p0) / Math.max(1e-9, (calX.t1 - calX.t0));
+    return pxPerSec > 0 ? 1 / pxPerSec : null;
+  }
+
+  function recompute(fullRender) {
+    const { trace } = state;
+    if (!trace || !trace.ok) return;
+    const sig = signalFromTrace();
+    if (sig.ys.length < 32) { showFail('有效波形过短，无法分析。'); return; }
+    const an = C.analyzeSignal(sig.ys, spacingSec());
+    if (!an.ok) { showFail('信号分析失败：' + (an.reason || '未知')); return; }
+    state.analysis = an;
+    state.quality = C.qualityScore(trace, an);
+    renderResult(fullRender !== false);
+  }
+
+  function fmt(v, d) { return isFinite(v) ? v.toFixed(d == null ? 2 : d) : '—'; }
+
+  function renderResult() {
+    const an = state.analysis, q = state.quality;
+    if (!an || !an.ok) return;
+    setStatus('分析完成');
+    $('failCard').hidden = true; $('resultCard').hidden = false;
+    $('ratioText').textContent = fmt(an.ratio, 2);
+    const cls = C.classify(an.ratio);
+    const chip = $('classChip');
+    chip.className = 'chip ' + cls.cls; chip.textContent = cls.label;
+    const qLabel = q.score > 0.66 ? '质量：较好' : q.score > 0.45 ? '质量：一般' : '质量：低（结果仅供参考）';
+    let qtxt = qLabel + ' · 覆盖 ' + (state.trace.coverage * 100).toFixed(0) + '% · SNR≈' + fmt(an.snr, 1) + ' · 原文阈值 1.0（本工具设 ±0.1 灰区）';
+    if (an.warn) qtxt += ' · ⚠ ' + an.warn;
+    $('qualityText').textContent = qtxt;
+    $('hrText').textContent = an.hr ? Math.round(an.hr) + ' bpm' : '未标定';
+    const qm = $('qmText'), pi = $('piText');
+    if (state.calY) {
+      const vals = signalFromTrace().ys;
+      const st = C.calcQmPI(vals);
+      qm.textContent = fmt(st.qm, 1); pi.textContent = fmt(st.pi, 2);
+    } else {
+      qm.textContent = '未标定'; pi.textContent = '未标定';
+    }
+    $('cyclesText').textContent = fmt(an.cycles, 1);
+    drawPreview(); drawSpectrum();
+    $('techBody').innerHTML =
+      '<p>模式：' + state.trace.mode + '；面板评分：' + fmt(state.panel.score, 2) + '；覆盖：' + (state.trace.coverage * 100).toFixed(0) + '%；峰峰值：' + fmt(state.trace.ppAmp, 0) + ' px</p>' +
+      '<p>F0 = ' + fmt(an.f0Hz || an.f0, 4) + (an.f0Hz ? ' Hz' : ' cycles/px') + '；B0 = ' + fmt(an.b0, 1) + '；B1 = ' + fmt(an.b1, 2) + '；比值 = ' + fmt(an.ratio, 3) + '</p>' +
+      '<p>x 标定：' + (state.calX ? fmt(state.calX.t0, 2) + '–' + fmt(state.calX.t1, 2) + ' s' : '无（比值不受影响，心率不可用）') + '；y 标定：' + (state.calY ? fmt(state.calY.v0, 1) + '–' + fmt(state.calY.v1, 1) : '无（Qm/PI 不可用）') + '</p>' +
+      '<p>本工具近似设备内部 FFT（Hann 窗、补零 4096）；拍照透视、滤波与取段差异会影响绝对值。</p>';
+    syncAxisInputs();
+    window.__lastResult = {
+      ratio: an.ratio, hr: an.hr, f0Hz: an.f0Hz, b0: an.b0, b1: an.b1,
+      coverage: state.trace.coverage, quality: q.score, classKey: cls.key,
+      calX: state.calX, calY: state.calY, mode: state.trace.mode,
+      cycles: an.cycles, snr: an.snr
+    };
+  }
+
+  function fitCanvas(canvas, maxH) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cssW = canvas.parentElement.clientWidth - 2;
+    const aspect = state.H / state.W;
+    const cssH = Math.min(maxH || 9999, Math.max(160, cssW * aspect));
+    canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+    return { ctx: canvas.getContext('2d'), cssW, cssH, dpr };
+  }
+
+  function drawPreview() {
+    if (!state.img) return;
+    const cv = $('previewCanvas');
+    const { ctx, cssW, cssH, dpr } = fitCanvas(cv, 520);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const sx = cssW / state.W, sy = cssH / state.H;
+    ctx.drawImage(state.img, 0, 0, state.W, state.H, 0, 0, cssW, cssH);
+    const tr = state.trace;
+    ctx.strokeStyle = 'rgba(23,122,83,0.9)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    let started = false;
+    for (let i = tr.first; i <= tr.last; i++) {
+      const y = tr.y[i]; if (!isFinite(y)) continue;
+      const X = (tr.x0 + i) * sx, Y = y * sy;
+      if (!started) { ctx.moveTo(X, Y); started = true; } else ctx.lineTo(X, Y);
+    }
+    ctx.stroke();
+    const rect = state.panel.rect;
+    const xAxisY = state.axes.xAxisY || (rect.y + rect.h);
+    const yAxisX = state.axes.yAxisX || rect.x;
+    ctx.strokeStyle = 'rgba(15,107,143,0.85)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(rect.x * sx, xAxisY * sy); ctx.lineTo((rect.x + rect.w) * sx, xAxisY * sy); ctx.stroke();
+    ctx.strokeStyle = 'rgba(164,104,0,0.9)';
+    ctx.beginPath(); ctx.moveTo(yAxisX * sx, rect.y * sy); ctx.lineTo(yAxisX * sx, (rect.y + rect.h) * sy); ctx.stroke();
+    drawHandle((state.calX ? state.calX.p0 : rect.x) * sx, xAxisY * sy, '#0f6b8f', 't0');
+    drawHandle((state.calX ? state.calX.p1 : rect.x + rect.w) * sx, xAxisY * sy, '#0f6b8f', 't1');
+    drawHandle(yAxisX * sx, (state.calY ? state.calY.p0 : rect.y + rect.h * 0.8) * sy, '#a46800', 'v0');
+    drawHandle(yAxisX * sx, (state.calY ? state.calY.p1 : rect.y + rect.h * 0.3) * sy, '#a46800', 'v1');
+    function drawHandle(x, y, color, label) {
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = color; ctx.stroke();
+      ctx.fillStyle = color; ctx.font = '12px ui-monospace, monospace'; ctx.fillText(label, x + 11, y + 4);
+    }
+    state._view = { sx, sy, cssW, cssH };
+  }
+
+  function drawSpectrum() {
+    const an = state.analysis;
+    const cv = $('spectrumCanvas');
+    if (!an || !an.ok) return;
+    const { ctx, cssW, cssH, dpr } = fitCanvas(cv, 220);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const pad = 30, Wp = cssW - pad - 10, Hp = cssH - pad - 12;
+    const sig = signalFromTrace().ys;
+    const s = C.detrend(Float64Array.from(sig));
+    const ps = C.powerSpectrum(s, 4096);
+    const maxF = Math.min(5 * an.f0, (ps.half - 2) * an.df) * 1.2;
+    const kMax = Math.min(ps.half - 2, Math.ceil(maxF / an.df));
+    let maxP = 0;
+    for (let k = 2; k <= kMax; k++) maxP = Math.max(maxP, ps.P[k]);
+    ctx.strokeStyle = '#9fb2c1'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad, 10); ctx.lineTo(pad, 10 + Hp); ctx.lineTo(pad + Wp, 10 + Hp); ctx.stroke();
+    ctx.beginPath();
+    for (let k = 2; k <= kMax; k++) {
+      const x = pad + (k / kMax) * Wp;
+      const y = 10 + Hp - (ps.P[k] / (maxP || 1)) * (Hp * 0.85);
+      if (k === 2) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#0f6b8f'; ctx.lineWidth = 1.6; ctx.stroke();
+    const k0 = Math.round(an.f0 / an.df), k1 = Math.round(2 * an.f0 / an.df);
+    function marker(k, color, label) {
+      if (k < 2 || k > kMax) return;
+      const x = pad + (k / kMax) * Wp;
+      const y = 10 + Hp - (ps.P[k] / (maxP || 1)) * (Hp * 0.85);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = color; ctx.font = '12px ui-monospace, monospace';
+      ctx.fillText(label, Math.min(cssW - 22, x + 6), Math.max(14, y - 8));
+    }
+    marker(k0, '#0f6b8f', 'F0');
+    marker(k1, '#a46800', 'H1');
+    ctx.fillStyle = '#5b6b7a'; ctx.font = '11px -apple-system, sans-serif';
+    ctx.fillText('频率 →', cssW / 2 - 20, cssH - 6);
+  }
+
+  function syncAxisInputs() {
+    const cx = state.calX, cy = state.calY;
+    $('xT0').value = cx ? cx.t0.toFixed(2) : '';
+    $('xT1').value = cx ? cx.t1.toFixed(2) : '';
+    $('yV0').value = cy ? cy.v0.toFixed(1) : '';
+    $('yV1').value = cy ? cy.v1.toFixed(1) : '';
+  }
+
+  function applyAxisInputs() {
+    const rect = state.panel.rect;
+    const t0 = parseFloat($('xT0').value), t1 = parseFloat($('xT1').value);
+    if (isFinite(t0) && isFinite(t1) && t1 !== t0) {
+      state.calX = state.calX || { p0: rect.x, t0: 0, p1: rect.x + rect.w, t1: 5 };
+      state.calX.t0 = t0; state.calX.t1 = t1;
+    } else state.calX = null;
+    const v0 = parseFloat($('yV0').value), v1 = parseFloat($('yV1').value);
+    if (isFinite(v0) && isFinite(v1) && v1 !== v0) {
+      state.calY = state.calY || { p0: rect.y + rect.h * 0.8, v0: 0, p1: rect.y + rect.h * 0.3, v1: 10 };
+      state.calY.v0 = v0; state.calY.v1 = v1;
+    } else state.calY = null;
+    recompute();
+  }
+
+  function bindDrag() {
+    const cv = $('previewCanvas');
+    let drag = null;
+    function localPos(e) {
+      const r = cv.getBoundingClientRect();
+      return { x: (e.clientX - r.left), y: (e.clientY - r.top) };
+    }
+    cv.addEventListener('pointerdown', e => {
+      const v = state._view; if (!v) return;
+      const p = localPos(e);
+      const rect = state.panel.rect;
+      const xAxisY = (state.axes.xAxisY || (rect.y + rect.h)) * v.sy;
+      const yAxisX = (state.axes.yAxisX || rect.x) * v.sx;
+      const pts = [
+        { id: 'x0', x: (state.calX ? state.calX.p0 : rect.x) * v.sx, y: xAxisY },
+        { id: 'x1', x: (state.calX ? state.calX.p1 : rect.x + rect.w) * v.sx, y: xAxisY },
+        { id: 'y0', x: yAxisX, y: (state.calY ? state.calY.p0 : rect.y + rect.h * 0.8) * v.sy },
+        { id: 'y1', x: yAxisX, y: (state.calY ? state.calY.p1 : rect.y + rect.h * 0.3) * v.sy }
+      ];
+      for (const pt of pts) {
+        if (Math.hypot(p.x - pt.x, p.y - pt.y) < 18) { drag = pt.id; cv.setPointerCapture(e.pointerId); break; }
+      }
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const v = state._view; const p = localPos(e);
+      const rect = state.panel.rect;
+      if (drag === 'x0' || drag === 'x1') {
+        const px = Math.max(rect.x, Math.min(rect.x + rect.w, p.x / v.sx));
+        if (!state.calX) state.calX = { p0: rect.x, t0: 0, p1: rect.x + rect.w, t1: 5 };
+        if (drag === 'x0') state.calX.p0 = px; else state.calX.p1 = px;
+      } else {
+        const py = Math.max(rect.y, Math.min(rect.y + rect.h, p.y / v.sy));
+        if (!state.calY) state.calY = { p0: rect.y + rect.h * 0.8, v0: 0, p1: rect.y + rect.h * 0.3, v1: 10 };
+        if (drag === 'y0') state.calY.p0 = py; else state.calY.p1 = py;
+      }
+      drawPreview(); syncAxisInputs();
+    });
+    cv.addEventListener('pointerup', () => { if (drag) { drag = null; recompute(); } });
+    cv.addEventListener('pointercancel', () => { drag = null; });
+  }
+
+  function loadDemo() {
+    const W = 900, H = 420;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#e3eaef'; ctx.lineWidth = 1;
+    for (let x = 90; x <= 840; x += 150) { ctx.beginPath(); ctx.moveTo(x, 40); ctx.lineTo(x, 350); ctx.stroke(); }
+    for (let y = 50; y <= 350; y += 30) { ctx.beginPath(); ctx.moveTo(90, y); ctx.lineTo(840, y); ctx.stroke(); }
+    ctx.strokeStyle = '#44515d'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(90, 40); ctx.lineTo(90, 350); ctx.lineTo(840, 350); ctx.stroke();
+    function drawText(txt, x, y, scale, color) {
+      ctx.fillStyle = color || '#44515d';
+      let cx = x;
+      for (const ch of txt) {
+        const rows = C.FONT5x7[ch];
+        if (rows) {
+          for (let r = 0; r < 7; r++) for (let c = 0; c < 5; c++) {
+            if ((rows[r] >> (4 - c)) & 1) ctx.fillRect(cx + c * scale, y + r * scale, scale, scale);
+          }
+        }
+        cx += 6 * scale;
+      }
+    }
+    for (let i = 0; i <= 5; i++) {
+      const x = 90 + i * 150;
+      ctx.strokeStyle = '#44515d'; ctx.beginPath(); ctx.moveTo(x, 350); ctx.lineTo(x, 357); ctx.stroke();
+      drawText(String(i), x - 3, 362, 2);
+    }
+    for (let i = 0; i <= 5; i++) {
+      const val = i * 20;
+      const y = 350 - (val / 100) * 300;
+      ctx.strokeStyle = '#44515d'; ctx.beginPath(); ctx.moveTo(90, y); ctx.lineTo(83, y); ctx.stroke();
+      drawText(String(val), 40, y - 7, 2);
+    }
+    const f = 1.25, ratio = 2.5, pxPerSec = 150;
+    const a0 = 20, a1 = a0 / Math.sqrt(ratio);
+    ctx.strokeStyle = '#1668b3'; ctx.lineWidth = 3; ctx.beginPath();
+    for (let px = 0; px <= 750; px++) {
+      const t = px / pxPerSec;
+      const v = 55 + a0 * Math.sin(2 * Math.PI * f * t) + a1 * Math.sin(2 * Math.PI * 2 * f * t + 0.7) + 6 * Math.sin(2 * Math.PI * 0.2 * t);
+      const x = 90 + px, y = 350 - (v / 100) * 300;
+      if (px === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    const data = ctx.getImageData(0, 0, W, H);
+    state.W = W; state.H = H; state.rgba = data.data;
+    const im = new Image();
+    im.onload = () => { state.img = im; runPipeline(); };
+    im.src = cv.toDataURL();
+    setStatus('示例：FFT 比值应约为 2.5，HR 约 75');
+  }
+
+  $('fileInput').addEventListener('change', e => { const f = e.target.files[0]; if (f) handleFile(f); });
+  $('demoBtn').addEventListener('click', loadDemo);
+  $('resetBtn').addEventListener('click', () => { location.reload(); });
+  $('retryBtn').addEventListener('click', () => $('fileInput').click());
+  $('newImageBtn').addEventListener('click', () => $('fileInput').click());
+  $('openAdjustFail').addEventListener('click', () => toast('请先重新选择图片或点击“载入示例波形”'));
+  $('adjustBtn').addEventListener('click', () => { $('axisCard').hidden = false; syncAxisInputs(); $('axisCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+  $('closeAxisBtn').addEventListener('click', () => { $('axisCard').hidden = true; });
+  $('applyAxisBtn').addEventListener('click', () => { applyAxisInputs(); toast('已按当前标定重算'); });
+  $('resetAxesBtn').addEventListener('click', () => {
+    state.calX = state.autoCalX ? { ...state.autoCalX } : null;
+    state.calY = state.autoCalY ? { ...state.autoCalY } : null;
+    syncAxisInputs(); recompute(); toast('已恢复自动识别');
+  });
+  bindDrag();
+  window.addEventListener('resize', () => { if (state.analysis && state.analysis.ok) { drawPreview(); drawSpectrum(); } });
+})();
+</script>
+</body>
+</html>
